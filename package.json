@@ -1,7 +1,7 @@
 {
   "name": "@wyre-ai/kaseya-vsax-mcp",
   "version": "0.0.0",
-  "description": "Kaseya VSA X (VSA 10) MCP server for Claude \u2014 devices, assets, notifications, organizations, automation, patching (read-only)",
+  "description": "Kaseya VSA X (VSA 10) MCP server \u2014 devices, assets, notifications, organizations, automation, patching (read-only)",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -58,7 +58,7 @@
     "vitest": "^5.0.3"
   },
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=22.14.0"
   },
   "publishConfig": {
     "registry": "https://npm.pkg.github.com"

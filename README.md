@@ -35,7 +35,7 @@ full page came back; the API's total count is not exposed by the SDK).
 | `vsax_devices_antivirus_get` | Antivirus status for a device. |
 | `vsax_devices_custom_fields_list` | Custom field values on a device. |
 | `vsax_devices_applied_policies_list` | Policies applied to a device. |
-| `vsax_assets_list` | Asset inventory. `include` picks sections; default is slim (`AssetInfo`, `IpAddresses`). |
+| `vsax_assets_list` | Asset inventory. `include` picks sections; default is slim (`AssetInfo`, `IpAddresses`), and an empty `include` also gives the slim default. |
 | `vsax_assets_get` | Asset for one device (same `include` rules). |
 | `vsax_notifications_list` / `vsax_notifications_get` | Tenant notifications / one notification. |
 | `vsax_organizations_list` / `vsax_organizations_get` | Organizations. |
@@ -84,13 +84,17 @@ token. Because this server only reads, grant the token **read-only
 permissions** on the endpoints you want the assistant to use (devices, assets,
 notifications, organizations/sites/groups, custom fields, scopes, automation,
 patch management, endpoint protection, audit logs, environment) and nothing
-else. If a tool reports *the VSA X API token lacks permission for `<endpoint>`*,
-grant that endpoint under **Configuration > API Access**.
+else. If a tool reports *The Kaseya VSA X API token isn't allowed to call `<endpoint>`*,
+open **Configuration > API Access > Third-Party Tokens**, edit the token, and on
+the **Authorization** tab grant that permission (and add the organization if the
+token is limited to certain organizations).
 
 If your tenant restricts API access by source address, add the IP address(es)
 of the host (or gateway egress) running this server to the token's **IP
-allowlist**, otherwise requests are rejected. Repeated 401/403 responses open
-the SDK's auth circuit breaker; fix the token, then reconnect.
+allowlist**, otherwise requests are rejected. Two 401 responses in a row open
+the SDK's auth circuit breaker and pause requests for 5 minutes (403 permission
+errors do not). The pause is kept in memory per tenant host and Token ID, so in
+gateway mode it also holds across requests. Fix the token, then try again.
 
 ## HTTP authentication
 
@@ -113,7 +117,7 @@ Those headers are the only credential source for that request. Missing headers r
 - **Read-only by default**: only `readOnlyHint` tools are registered; write tools (Phase 2) are gated by `READ_ONLY_MODE` / `DESTRUCTIVE_TOOLS_ENABLED`.
 - **Fail-closed S2S** on HTTP; `/health` is the only unauthenticated route.
 - **SSRF / credential-exfiltration guard**: the SDK only sends credentials to `<one-label>.vsax.net` over HTTPS.
-- **Secrets are never logged or returned.** SDK errors are mapped to fixed, safe messages (403 names the endpoint and points to Configuration > API Access; 401 invalid token; circuit open "authentication repeatedly failed; reconnect"; 429 retry-after). Unknown errors are not passed through.
+- **Secrets are never logged or returned.** SDK errors are mapped to fixed, safe messages (403 names the endpoint and points to Configuration > API Access > Third-Party Tokens; 401 "didn't accept the API token"; circuit open "rejected the API token twice in a row, so requests are paused for N minutes"; 429 says how long to wait). Unknown errors are not passed through.
 - **Input limits** (WYREAI-454): request bodies over 256 KiB get a 413 JSON-RPC error before parsing and the transport enforces the same `maxRequestBodySize`; tool inputs are limited to 10,000 elements; every tool schema caps string lengths (IDs 128, filter 1000, orderby 200), `top` (100) and array sizes. Tool results are truncated at 200,000 characters.
 
 ## Local development

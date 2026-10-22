@@ -19,39 +19,62 @@ function safePath(path: string | undefined): string {
   return path ? path.replace(/[^A-Za-z0-9/_.%-]/g, "").slice(0, 200) || "this endpoint" : "this endpoint";
 }
 
+function sentence(text: string): string {
+  return text.trim().replace(/[.\s]+$/, "");
+}
+
 export function toSafeErrorMessage(err: unknown, secrets: readonly string[] = []): string {
   const scrub = (s: string) => scrubSecrets(s, secrets);
   if (err instanceof ToolInputError) return scrub(err.message);
   if (err instanceof KaseyaVsaxAuthCircuitOpenError) {
-    return "VSA X authentication repeatedly failed; reconnect with a valid API token.";
+    const minutes = Math.max(1, Math.ceil(err.retryAfterMs / 60_000));
+    return `Kaseya VSA X rejected the API token twice in a row, so requests are paused for ${minutes} ${minutes === 1 ? "minute" : "minutes"} to avoid getting this server's IP blocked. Check the Token ID and Token Secret, then try again.`;
   }
   if (err instanceof KaseyaVsaxForbiddenError) {
-    return `the VSA X API token lacks permission for ${safePath(err.path)}; grant it under Configuration > API Access`;
+    return `The Kaseya VSA X API token isn't allowed to call ${safePath(err.path)}. In VSA X, open Configuration > API Access > Third-Party Tokens, edit the token, and on the Authorization tab grant that permission. If the token is limited to certain organizations, add the organization too.`;
   }
   if (err instanceof KaseyaVsaxAuthenticationError) {
-    return "the VSA X API token is invalid or expired (401); check the Token ID and Secret.";
+    return "Kaseya VSA X didn't accept the API token. It may be wrong, expired or revoked. Check the Token ID and Token Secret, or create a new token under Configuration > API Access > Third-Party Tokens.";
   }
   if (err instanceof KaseyaVsaxRateLimitError) {
     return err.retryAfterSeconds !== undefined
-      ? `VSA X rate limit reached; retry after ${Math.ceil(err.retryAfterSeconds)} s`
-      : "VSA X rate limit reached; retry later";
+      ? `Kaseya VSA X rate limit reached. Wait ${Math.ceil(err.retryAfterSeconds)} seconds, then try again.`
+      : "Kaseya VSA X rate limit reached. Wait a minute, then try again.";
   }
-  if (err instanceof KaseyaVsaxNotFoundError) return `not found: ${safePath(err.path)}`;
-  if (err instanceof KaseyaVsaxConfigError) return "invalid VSA X connection settings (server URL or token)";
-  if (err instanceof KaseyaVsaxTimeoutError) return "the VSA X request timed out";
+  if (err instanceof KaseyaVsaxNotFoundError) {
+    return `Kaseya VSA X has nothing at ${safePath(err.path)}. Check the ID, for example with the matching list tool.`;
+  }
+  if (err instanceof KaseyaVsaxConfigError) {
+    return scrub(`Kaseya VSA X connection settings aren't valid: ${sentence(err.message)}.`);
+  }
+  if (err instanceof KaseyaVsaxTimeoutError) {
+    return "The Kaseya VSA X request timed out. Try again, or narrow it with filter or a smaller top.";
+  }
   if (err instanceof KaseyaVsaxError) {
-    const status = err.status ? ` (HTTP ${err.status})` : "";
     switch (err.code) {
+      case "INVALID_PATH_PARAM": {
+        const name = /^Invalid path parameter "([A-Za-z0-9_]{1,64})"/.exec(err.message)?.[1];
+        return name
+          ? `The ${name} value isn't valid (empty, ".", or contains "/"). Check the ID values.`
+          : `One of the IDs isn't valid (empty, ".", or contains "/").`;
+      }
       case "VALIDATION_ERROR":
-      case "INVALID_PATH_PARAM":
-        return scrub(`the VSA X request was rejected${status}: ${err.message}`);
+        return err.detail
+          ? scrub(`Kaseya VSA X rejected the request: ${sentence(err.detail)}. Check the filter, orderby and ID values.`)
+          : "Kaseya VSA X rejected the request. Check the filter, orderby and ID values.";
       case "SERVER_ERROR":
-        return `the VSA X server returned an error${status}`;
+        return "Kaseya VSA X had a server error. Try again in a minute.";
       case "NETWORK_ERROR":
-        return "could not reach the VSA X server";
+        return "Couldn't reach Kaseya VSA X. Check the server URL and this server's network access, and the token's IP allowlist if it has one.";
+      case "REDIRECT_REFUSED":
+        return "Kaseya VSA X redirected the request, and this server doesn't follow redirects. Check that the server URL is your tenant host, like acme.vsax.net.";
+      case "PAGINATION_ERROR":
+        return "Kaseya VSA X returned paging data that couldn't be used. Try again with a smaller top or a narrower filter.";
       default:
-        return `VSA X request failed${status} [${err.code}]`;
+        return "The Kaseya VSA X request failed. Try again; if it keeps failing, check the connection settings.";
     }
   }
-  return "unexpected error while calling VSA X";
+  // Unexpected (non-SDK) error: log the class name only, never the message.
+  console.error("Unexpected tool error:", err instanceof Error ? err.name : "unknown");
+  return "Unexpected error while calling Kaseya VSA X. Try again; if it keeps failing, check the server logs.";
 }

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createHmac } from "node:crypto";
 import type { AddressInfo } from "node:net";
 import type { Server } from "node:http";
@@ -158,5 +158,52 @@ describe("parseGatewayCredentials", () => {
       expect(parseGatewayCredentials({ ...GW, "x-kaseya-vsax-server-url": host })).toMatchObject({ ok: false, status: 400 });
     }
     expect(parseGatewayCredentials(GW)).toMatchObject({ ok: true });
+  });
+});
+
+describe("shared auth circuit across gateway requests", () => {
+  const callTool = (base: string, headers: Record<string, string>) =>
+    post(
+      base,
+      { ...headers, ...s2s() },
+      JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "vsax_environment_get", arguments: {} } })
+    ).then(async (r) => (await r.json()).result.content[0].text as string);
+
+  const run = async (status: number, hostLabel: string) => {
+    const calls: string[] = [];
+    const realFetch = globalThis.fetch;
+    const fetchMock = vi.fn(async (input: unknown, init?: RequestInit) => {
+      const url = String(input);
+      if (!url.includes(".vsax.net")) return realFetch(input as string, init);
+      calls.push(url);
+      return new Response(JSON.stringify({ Meta: {} }), { status });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const base = await start({ CONDUIT_S2S_SECRET: SECRET, AUTH_MODE: "gateway" });
+    const headers = { ...GW, "x-kaseya-vsax-server-url": `${hostLabel}.vsax.net`, "x-kaseya-vsax-token-id": `id-${hostLabel}` };
+    return { calls, base, headers, realFetch };
+  };
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("401 twice locks the third request out without calling fetch; other token ids are unaffected", async () => {
+    const { calls, base, headers } = await run(401, "tenant401");
+    const want = /didn't accept the API token/;
+    expect(await callTool(base, headers)).toMatch(want);
+    expect(await callTool(base, headers)).toMatch(want);
+    const before = calls.length;
+    expect(await callTool(base, headers)).toMatch(/rejected the API token twice in a row.*paused for 5 minutes/);
+    expect(calls.length).toBe(before);
+    // different token id on the same host is not locked out
+    expect(await callTool(base, { ...headers, "x-kaseya-vsax-token-id": "other-id" })).toMatch(want);
+    expect(calls.length).toBe(before + 1);
+  });
+
+  it("403s do not lock out", async () => {
+    const { calls, base, headers } = await run(403, "tenant403");
+    for (let i = 0; i < 4; i++) {
+      expect(await callTool(base, headers)).toMatch(/isn't allowed to call/);
+    }
+    expect(calls.length).toBe(4);
   });
 });

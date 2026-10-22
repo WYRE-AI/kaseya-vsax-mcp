@@ -26,7 +26,7 @@ const strId = (what: string) => z.string().min(1).max(MAX_ID_LENGTH).describe(wh
 
 const listShape = {
   top: z.number().int().min(1).max(MAX_TOP).optional().describe(`Page size (default ${DEFAULT_TOP}, max ${MAX_TOP})`),
-  skip: z.number().int().min(0).max(MAX_SKIP).optional().describe("Records to skip"),
+  skip: z.number().int().min(0).max(MAX_SKIP).optional().describe("Records to skip. For the next page, pass nextSkip from the previous result."),
   filter: z.string().max(MAX_FILTER_LENGTH).optional().describe("OData $filter expression"),
   orderby: z.string().max(MAX_ORDERBY_LENGTH).optional().describe("OData $orderby expression"),
 };
@@ -45,6 +45,10 @@ const ASSET_SECTIONS = [
 ] as const satisfies readonly AssetSection[];
 /** Slim default: the heavy sections (software, updates, security) are opt-in. */
 const DEFAULT_ASSET_SECTIONS: AssetSection[] = ["AssetInfo", "IpAddresses"];
+/** Undefined or an empty list means the slim default (the SDK sends no include for [], which returns the heavy payload). */
+function withDefaultSections(include: AssetSection[] | undefined): AssetSection[] {
+  return include && include.length > 0 ? include : DEFAULT_ASSET_SECTIONS;
+}
 const includeShape = {
   include: z
     .array(z.enum(ASSET_SECTIONS))
@@ -88,7 +92,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: "vsax_devices_list",
     title: "List devices",
-    description: "List managed devices. Supports OData filter/orderby, paging and an optional scopeId.",
+    description: "List devices managed in Kaseya VSA X. Read-only. Narrow with filter (OData, e.g. \"Name eq 'APP-01'\"), sort with orderby, or pass scopeId. Use a device's Identifier as deviceId in the other device tools.",
     access: "read",
     inputSchema: { ...listShape, scopeId: z.number().int().nonnegative().optional().describe("Restrict to this scope") },
     handler: async ({ client }, args) => {
@@ -99,17 +103,17 @@ export const TOOLS: ToolDef[] = [
   {
     name: "vsax_devices_get",
     title: "Get device",
-    description: "Get one device by device ID.",
+    description: "Get one device by its Identifier. Read-only.",
     access: "read",
-    inputSchema: { deviceId: strId("Device ID") },
+    inputSchema: { deviceId: strId("Device Identifier (from vsax_devices_list)") },
     handler: ({ client }, args) => client.devices.get(a<{ deviceId: string }>(args).deviceId),
   },
   {
     name: "vsax_devices_notifications_list",
     title: "List device notifications",
-    description: "List notifications (alerts) raised for a device.",
+    description: "List notifications (alerts) raised for a device. Read-only.",
     access: "read",
-    inputSchema: { deviceId: strId("Device ID"), ...listShape },
+    inputSchema: { deviceId: strId("Device Identifier (from vsax_devices_list)"), ...listShape },
     handler: async ({ client }, args) => {
       const p = a<ListArgs & { deviceId: string }>(args);
       return toPage(await client.devices.notifications(p.deviceId, listParams(p)), p);
@@ -118,17 +122,17 @@ export const TOOLS: ToolDef[] = [
   {
     name: "vsax_devices_antivirus_get",
     title: "Get device antivirus",
-    description: "Get antivirus / endpoint-protection status for a device.",
+    description: "Get antivirus / endpoint-protection status for a device. Read-only.",
     access: "read",
-    inputSchema: { deviceId: strId("Device ID") },
+    inputSchema: { deviceId: strId("Device Identifier (from vsax_devices_list)") },
     handler: ({ client }, args) => client.devices.antivirus(a<{ deviceId: string }>(args).deviceId),
   },
   {
     name: "vsax_devices_custom_fields_list",
     title: "List device custom fields",
-    description: "List custom field values assigned to a device.",
+    description: "List the custom field values set on one device. Read-only. For field definitions, use vsax_custom_fields_list.",
     access: "read",
-    inputSchema: { deviceId: strId("Device ID") },
+    inputSchema: { deviceId: strId("Device Identifier (from vsax_devices_list)") },
     handler: async ({ client }, args) => ({
       items: await client.devices.customFields(a<{ deviceId: string }>(args).deviceId),
     }),
@@ -136,9 +140,9 @@ export const TOOLS: ToolDef[] = [
   {
     name: "vsax_devices_applied_policies_list",
     title: "List device applied policies",
-    description: "List policies applied to a device.",
+    description: "List policies applied to a device. Read-only.",
     access: "read",
-    inputSchema: { deviceId: strId("Device ID") },
+    inputSchema: { deviceId: strId("Device Identifier (from vsax_devices_list)") },
     handler: async ({ client }, args) => ({
       items: await client.devices.appliedPolicies(a<{ deviceId: string }>(args).deviceId),
     }),
@@ -148,23 +152,23 @@ export const TOOLS: ToolDef[] = [
   {
     name: "vsax_assets_list",
     title: "List assets",
-    description: "List device assets (hardware/OS/network inventory). Heavy sections are opt-in via include.",
+    description: "List device assets (hardware/OS/network inventory). Read-only. Returns AssetInfo and IpAddresses unless you set include (an empty include also gives that default). Add InstalledSoftware, Updates, AvailableUpdates or Security only when needed, since they're large.",
     access: "read",
     inputSchema: { ...listShape, ...includeShape },
     handler: async ({ client }, args) => {
       const p = a<ListArgs & { include?: AssetSection[] }>(args);
-      return toPage(await client.assets.list({ ...listParams(p), include: p.include ?? DEFAULT_ASSET_SECTIONS }), p);
+      return toPage(await client.assets.list({ ...listParams(p), include: withDefaultSections(p.include) }), p);
     },
   },
   {
     name: "vsax_assets_get",
     title: "Get asset",
-    description: "Get the asset record for a device. Heavy sections are opt-in via include.",
+    description: "Get the asset record for a device. Read-only. Returns AssetInfo and IpAddresses unless you set include (an empty include also gives that default). Add InstalledSoftware, Updates, AvailableUpdates or Security only when needed, since they're large.",
     access: "read",
-    inputSchema: { deviceId: strId("Device ID"), ...includeShape },
+    inputSchema: { deviceId: strId("Device Identifier (from vsax_devices_list)"), ...includeShape },
     handler: ({ client }, args) => {
       const p = a<{ deviceId: string; include?: AssetSection[] }>(args);
-      return client.assets.get(p.deviceId, p.include ?? DEFAULT_ASSET_SECTIONS);
+      return client.assets.get(p.deviceId, withDefaultSections(p.include));
     },
   },
 
@@ -172,7 +176,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: "vsax_notifications_list",
     title: "List notifications",
-    description: "List notifications (alerts) across the tenant.",
+    description: "List notifications (alerts) across the tenant. Read-only.",
     access: "read",
     inputSchema: listShape,
     handler: async ({ client }, args) => toPage(await client.notifications.list(listParams(a<ListArgs>(args))), a<ListArgs>(args)),
@@ -180,7 +184,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: "vsax_notifications_get",
     title: "Get notification",
-    description: "Get one notification by ID.",
+    description: "Get one notification by ID. Read-only.",
     access: "read",
     inputSchema: { notificationId: id("Notification ID") },
     handler: ({ client }, args) => client.notifications.get(a<{ notificationId: string | number }>(args).notificationId),
@@ -190,7 +194,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: "vsax_organizations_list",
     title: "List organizations",
-    description: "List organizations.",
+    description: "List organizations, the top level above sites and groups. Read-only.",
     access: "read",
     inputSchema: listShape,
     handler: async ({ client }, args) => toPage(await client.organizations.list(listParams(a<ListArgs>(args))), a<ListArgs>(args)),
@@ -198,7 +202,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: "vsax_organizations_get",
     title: "Get organization",
-    description: "Get one organization by ID.",
+    description: "Get one organization by ID. Read-only.",
     access: "read",
     inputSchema: { organizationId: id("Organization ID") },
     handler: ({ client }, args) => client.organizations.get(a<{ organizationId: string | number }>(args).organizationId),
@@ -206,7 +210,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: "vsax_sites_list",
     title: "List sites",
-    description: "List sites.",
+    description: "List sites. Each site belongs to an organization. Read-only.",
     access: "read",
     inputSchema: listShape,
     handler: async ({ client }, args) => toPage(await client.sites.list(listParams(a<ListArgs>(args))), a<ListArgs>(args)),
@@ -214,7 +218,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: "vsax_sites_get",
     title: "Get site",
-    description: "Get one site by ID.",
+    description: "Get one site by ID. Read-only.",
     access: "read",
     inputSchema: { siteId: id("Site ID") },
     handler: ({ client }, args) => client.sites.get(a<{ siteId: string | number }>(args).siteId),
@@ -222,7 +226,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: "vsax_groups_list",
     title: "List groups",
-    description: "List device groups.",
+    description: "List device groups. Each group belongs to a site, and devices belong to a group. Read-only.",
     access: "read",
     inputSchema: listShape,
     handler: async ({ client }, args) => toPage(await client.groups.list(listParams(a<ListArgs>(args))), a<ListArgs>(args)),
@@ -230,7 +234,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: "vsax_groups_get",
     title: "Get group",
-    description: "Get one group by ID.",
+    description: "Get one group by ID. Read-only.",
     access: "read",
     inputSchema: { groupId: id("Group ID") },
     handler: ({ client }, args) => client.groups.get(a<{ groupId: string | number }>(args).groupId),
@@ -241,7 +245,7 @@ export const TOOLS: ToolDef[] = [
     name: "vsax_custom_fields_list",
     title: "List custom fields",
     description:
-      "List custom field definitions. With entityType + entityId, list the custom field values assigned to that organization, site, group or device instead.",
+      "List custom field definitions. With entityType + entityId, list the custom field values assigned to that organization, site, group or device instead. top, skip, filter and orderby apply only when listing definitions. Read-only.",
     access: "read",
     inputSchema: {
       ...listShape,
@@ -270,7 +274,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: "vsax_scopes_list",
     title: "List scopes",
-    description: "List scopes.",
+    description: "List scopes. Pass a scope's ID as scopeId to vsax_devices_list to see only its devices. Read-only.",
     access: "read",
     inputSchema: listShape,
     handler: async ({ client }, args) => toPage(await client.scopes.list(listParams(a<ListArgs>(args))), a<ListArgs>(args)),
@@ -280,7 +284,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: "vsax_scripts_list",
     title: "List or get scripts",
-    description: "List automation scripts, or get one when scriptId is given.",
+    description: "List automation scripts, or pass scriptId to get one script; paging and filters are then ignored. Read-only.",
     access: "read",
     inputSchema: { ...listShape, scriptId: strId("Return this script only").optional() },
     handler: async ({ client }, args) => {
@@ -291,13 +295,13 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: "vsax_script_executions_list",
-    title: "List script executions",
-    description: "List executions of a script on a device, or get one when executionId is given.",
+    title: "List or get script executions",
+    description: "List executions of a script on a device, or pass executionId to get one execution; paging and filters are then ignored. Read-only.",
     access: "read",
     inputSchema: {
       ...listShape,
       scriptId: strId("Script ID"),
-      deviceId: strId("Device ID"),
+      deviceId: strId("Device Identifier (from vsax_devices_list)"),
       executionId: id("Return this execution only").optional(),
     },
     handler: async ({ client }, args) => {
@@ -311,7 +315,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: "vsax_tasks_list",
     title: "List or get tasks",
-    description: "List automation tasks, or get one when taskId is given.",
+    description: "List automation tasks, or pass taskId to get one task; paging and filters are then ignored. Read-only.",
     access: "read",
     inputSchema: { ...listShape, taskId: id("Return this task only").optional() },
     handler: async ({ client }, args) => {
@@ -324,11 +328,11 @@ export const TOOLS: ToolDef[] = [
     name: "vsax_task_executions_get",
     title: "Get task execution",
     description:
-      "Get a task execution and its devices. With deviceId, list the scripts that ran on that device; with deviceId + scriptId, get the script output.",
+      "Get a task execution and its devices. Without deviceId, returns the first 50 devices only. With deviceId, list the scripts that ran on that device; with deviceId + scriptId, get the script output. Read-only.",
     access: "read",
     inputSchema: {
       executionId: id("Task execution ID"),
-      deviceId: strId("Device ID").optional(),
+      deviceId: strId("Device Identifier (from vsax_devices_list)").optional(),
       scriptId: strId("Script ID (requires deviceId)").optional(),
     },
     handler: async ({ client }, args) => {
@@ -347,7 +351,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: "vsax_workflows_list",
     title: "List or get workflows",
-    description: "List automation workflows, or get one when workflowId is given.",
+    description: "List automation workflows, or pass workflowId to get one workflow; paging and filters are then ignored. Read-only.",
     access: "read",
     inputSchema: { ...listShape, workflowId: id("Return this workflow only").optional() },
     handler: async ({ client }, args) => {
@@ -358,8 +362,8 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: "vsax_workflow_executions_list",
-    title: "List workflow executions",
-    description: "List workflow executions, or get one when executionId is given.",
+    title: "List or get workflow executions",
+    description: "List workflow executions, or pass executionId to get one execution; paging and filters are then ignored. Read-only.",
     access: "read",
     inputSchema: { ...listShape, executionId: id("Return this execution only").optional() },
     handler: async ({ client }, args) => {
@@ -373,7 +377,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: "vsax_patch_policies_get",
     title: "Get patch policy",
-    description: "Get a patch management policy by policyId, or the global patch rules when policyId is omitted or globalRules is true.",
+    description: "Get a patch management policy by policyId, or the global patch rules when policyId is omitted or globalRules is true. If both are given, globalRules wins. Read-only.",
     access: "read",
     inputSchema: {
       policyId: id("Patch policy ID").optional(),
@@ -388,7 +392,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: "vsax_endpoint_protection_policies_get",
     title: "Get endpoint protection policy",
-    description: "Get an endpoint protection policy by ID.",
+    description: "Get an endpoint protection policy by ID. Read-only.",
     access: "read",
     inputSchema: { policyId: id("Endpoint protection policy ID") },
     handler: ({ client }, args) => client.endpointProtection.getPolicy(a<{ policyId: string | number }>(args).policyId),
@@ -396,7 +400,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: "vsax_audit_logs_list",
     title: "List audit logs",
-    description: "List audit log entries.",
+    description: "List audit log entries. Read-only.",
     access: "read",
     inputSchema: listShape,
     handler: async ({ client }, args) => toPage(await client.auditLogs.list(listParams(a<ListArgs>(args))), a<ListArgs>(args)),
@@ -404,7 +408,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: "vsax_environment_get",
     title: "Get environment",
-    description: "Get VSA X environment information (version, tenant).",
+    description: "Get Kaseya VSA X environment details: product version, customer name and ID, SaaS or on-prem, language and license. Read-only.",
     access: "read",
     inputSchema: {},
     handler: ({ client }) => client.environment.get(),

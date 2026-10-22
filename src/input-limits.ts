@@ -5,8 +5,9 @@
  * input validation) and GHSA-f897-62hf-6gxq (no request body / batch cap).
  * Tracking: Linear WYREAI-454.
  *
- * The SDK's McpServer exposes `maxToolInputElements`, but the low-level
- * Server does not, so tool handlers call these helpers before dispatching.
+ * McpServer enforces `maxToolInputElements` on incoming requests; the tool
+ * dispatcher (server.ts dispatchTool) also calls these helpers before any
+ * handler runs, as a second guard.
  * Dependency-free on purpose: copy verbatim to other fleet repos.
  */
 

@@ -1,4 +1,4 @@
-import { KaseyaVsaxClient, normalizeServerUrl } from "@wyre-ai/node-kaseya-vsax";
+import { KaseyaVsaxClient, createAuthCircuitStore, normalizeServerUrl } from "@wyre-ai/node-kaseya-vsax";
 import { cleanCredential } from "./config.js";
 
 export interface VsaxCredentials {
@@ -16,8 +16,16 @@ export function getCredentials(env: NodeJS.ProcessEnv = process.env): VsaxCreden
   return { serverUrl, tokenId, tokenSecret };
 }
 
+/**
+ * One process-wide breaker store (in memory), keyed by the SDK on tenant host +
+ * sha256(tokenId). Gateway mode builds a client per request, so without a shared
+ * store the 401 lockout would never carry over between requests.
+ */
+const authCircuitStore = createAuthCircuitStore();
+
 export function createClient(creds: VsaxCredentials): KaseyaVsaxClient {
   return new KaseyaVsaxClient({
+    authCircuitStore,
     serverUrl: creds.serverUrl,
     tokenId: creds.tokenId,
     tokenSecret: creds.tokenSecret,

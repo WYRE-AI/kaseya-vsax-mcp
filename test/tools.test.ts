@@ -9,7 +9,9 @@ import {
   KaseyaVsaxServerError,
   type KaseyaVsaxClient,
 } from "@wyre-ai/node-kaseya-vsax";
-import { createMcpServer } from "../src/server.js";
+import { readFileSync } from "node:fs";
+import { KaseyaVsaxNotFoundError, KaseyaVsaxValidationError, KaseyaVsaxConfigError, KaseyaVsaxError } from "@wyre-ai/node-kaseya-vsax";
+import { createMcpServer, dispatchTool, SERVER_VERSION, SERVER_INSTRUCTIONS } from "../src/server.js";
 import { loadToolFlags } from "../src/config.js";
 import { enabledTools, isToolEnabled, type ToolDef } from "../src/registry.js";
 import { TOOLS } from "../src/tools.js";
@@ -158,6 +160,14 @@ describe("argument mapping", () => {
     expect(fake.assets.get).toHaveBeenCalledWith("d1", ["Disks"]);
   });
 
+  it("treats include: [] as the slim default", async () => {
+    const { call, fake } = await connect();
+    await call("vsax_assets_list", { include: [] });
+    expect(fake.assets.list.mock.calls[0][0].include).toEqual(["AssetInfo", "IpAddresses"]);
+    await call("vsax_assets_get", { deviceId: "d1", include: [] });
+    expect(fake.assets.get).toHaveBeenCalledWith("d1", ["AssetInfo", "IpAddresses"]);
+  });
+
   it("custom_fields_list routes by entityType", async () => {
     const { call, fake } = await connect();
     await call("vsax_custom_fields_list", { entityType: "site", entityId: 5 });
@@ -225,11 +235,66 @@ describe("error mapping", () => {
 
   it("maps SDK errors to the documented safe messages", () => {
     expect(toSafeErrorMessage(new KaseyaVsaxForbiddenError("x", { path: "/api/v3/devices?token=abc" }), secrets)).toBe(
-      "the VSA X API token lacks permission for /api/v3/devices; grant it under Configuration > API Access"
+      "The Kaseya VSA X API token isn't allowed to call /api/v3/devices. In VSA X, open Configuration > API Access > Third-Party Tokens, edit the token, and on the Authorization tab grant that permission. If the token is limited to certain organizations, add the organization too."
     );
-    expect(toSafeErrorMessage(new KaseyaVsaxAuthenticationError("x"), secrets)).toMatch(/invalid/i);
-    expect(toSafeErrorMessage(new KaseyaVsaxAuthCircuitOpenError(1000), secrets)).toMatch(/repeatedly failed; reconnect/);
-    expect(toSafeErrorMessage(new KaseyaVsaxRateLimitError("x", 12), secrets)).toMatch(/retry after 12 s/);
+    expect(toSafeErrorMessage(new KaseyaVsaxAuthenticationError("x"), secrets)).toBe(
+      "Kaseya VSA X didn't accept the API token. It may be wrong, expired or revoked. Check the Token ID and Token Secret, or create a new token under Configuration > API Access > Third-Party Tokens."
+    );
+    expect(toSafeErrorMessage(new KaseyaVsaxAuthCircuitOpenError(300_000), secrets)).toBe(
+      "Kaseya VSA X rejected the API token twice in a row, so requests are paused for 5 minutes to avoid getting this server's IP blocked. Check the Token ID and Token Secret, then try again."
+    );
+    expect(toSafeErrorMessage(new KaseyaVsaxAuthCircuitOpenError(10), secrets)).toContain("paused for 1 minute ");
+    expect(toSafeErrorMessage(new KaseyaVsaxRateLimitError("x", 12), secrets)).toBe("Kaseya VSA X rate limit reached. Wait 12 seconds, then try again.");
+    expect(toSafeErrorMessage(new KaseyaVsaxRateLimitError("x"), secrets)).toBe("Kaseya VSA X rate limit reached. Wait a minute, then try again.");
+    expect(toSafeErrorMessage(new KaseyaVsaxNotFoundError("x", { path: "/api/v3/devices/d" }), secrets)).toBe(
+      "Kaseya VSA X has nothing at /api/v3/devices/d. Check the ID, for example with the matching list tool."
+    );
+    expect(toSafeErrorMessage(new KaseyaVsaxConfigError("Server host must be a single label under .vsax.net."), secrets)).toBe(
+      "Kaseya VSA X connection settings aren't valid: Server host must be a single label under .vsax.net."
+    );
+  });
+
+  it("uses err.detail for validation errors and the param name for invalid path params", () => {
+    expect(
+      toSafeErrorMessage(new KaseyaVsaxValidationError("Bad request (400): bad filter", { status: 400, detail: "bad filter." }), secrets)
+    ).toBe("Kaseya VSA X rejected the request: bad filter. Check the filter, orderby and ID values.");
+    expect(toSafeErrorMessage(new KaseyaVsaxValidationError("Bad request (400)", { status: 400 }), secrets)).toBe(
+      "Kaseya VSA X rejected the request. Check the filter, orderby and ID values."
+    );
+    expect(
+      toSafeErrorMessage(new KaseyaVsaxValidationError('Invalid path parameter "deviceId"', { code: "INVALID_PATH_PARAM" }), secrets)
+    ).toBe('The deviceId value isn\'t valid (empty, ".", or contains "/"). Check the ID values.');
+  });
+
+  it("maps server, network, timeout, redirect, pagination and other codes without leaking codes", () => {
+    const m = (code: string) => toSafeErrorMessage(new KaseyaVsaxError("x", { code, status: 302 }), secrets);
+    expect(m("REDIRECT_REFUSED")).toContain("doesn't follow redirects");
+    expect(m("PAGINATION_ERROR")).toContain("smaller top");
+    expect(m("HTTP_ERROR")).toBe("The Kaseya VSA X request failed. Try again; if it keeps failing, check the connection settings.");
+    for (const code of ["REDIRECT_REFUSED", "PAGINATION_ERROR", "HTTP_ERROR", "SERVER_ERROR", "NETWORK_ERROR"]) {
+      expect(m(code)).not.toMatch(/\[|HTTP \d|[A-Z]+_[A-Z]+/);
+    }
+    expect(m("SERVER_ERROR")).toBe("Kaseya VSA X had a server error. Try again in a minute.");
+    expect(m("NETWORK_ERROR")).toMatch(/^Couldn't reach Kaseya VSA X/);
+  });
+
+  it("logs only the error name for unexpected errors", () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      class WeirdError extends Error {
+        constructor(m: string) {
+          super(m);
+          this.name = "WeirdError";
+        }
+      }
+      toSafeErrorMessage(new WeirdError(`leak ${CREDS.tokenSecret}`), secrets);
+      const logged = spy.mock.calls.flat().join(" ");
+      expect(logged).toContain("WeirdError");
+      expect(logged).not.toContain(CREDS.tokenSecret);
+      expect(logged).not.toContain("leak");
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it("never leaks secrets or raw unknown error text", async () => {
@@ -245,7 +310,7 @@ describe("error mapping", () => {
 
     fake.devices.get.mockRejectedValue(new KaseyaVsaxForbiddenError("nope", { path: "/api/v3/devices/d" }));
     const f = await call("vsax_devices_get", { deviceId: "d" });
-    expect(f.text).toContain("lacks permission for /api/v3/devices/d");
+    expect(f.text).toContain("isn't allowed to call /api/v3/devices/d");
   });
 
   it("returns a tool error (not a throw) when no credentials are configured", async () => {
@@ -258,8 +323,37 @@ describe("error mapping", () => {
     try {
       const r = await client.callTool({ name: "vsax_environment_get", arguments: {} });
       expect(r.isError).toBe(true);
+      expect((r.content as Array<{ text: string }>)[0].text).toBe(
+        "Error: No Kaseya VSA X credentials are set. Set KASEYA_VSAX_SERVER_URL, KASEYA_VSAX_TOKEN_ID and KASEYA_VSAX_TOKEN_SECRET."
+      );
     } finally {
       process.env = saved;
     }
+  });
+});
+
+describe("server metadata and copy", () => {
+  it("SERVER_VERSION equals package.json version", () => {
+    const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string };
+    expect(SERVER_VERSION).toBe(pkg.version);
+  });
+
+  it("states read-only in server instructions and every tool description", async () => {
+    const { client } = await connect();
+    expect(client.getInstructions()).toBe(SERVER_INSTRUCTIONS);
+    expect(SERVER_INSTRUCTIONS).toMatch(/read-only/);
+    const { tools } = await client.listTools();
+    for (const t of tools) expect(t.description).toMatch(/Read-only\./);
+  });
+
+  it("dispatch refuses oversize input before the handler runs", async () => {
+    const handler = vi.fn().mockResolvedValue({});
+    const tool: ToolDef = { name: "t", title: "t", description: "t", access: "read", inputSchema: {}, handler };
+    const r = await dispatchTool(tool, {} as KaseyaVsaxClient, { junk: Array(10_001).fill(0) });
+    expect(r.isError).toBe(true);
+    expect(handler).not.toHaveBeenCalled();
+    const ok = await dispatchTool(tool, {} as KaseyaVsaxClient, { a: 1 });
+    expect(ok.isError).toBeUndefined();
+    expect(handler).toHaveBeenCalledTimes(1);
   });
 });

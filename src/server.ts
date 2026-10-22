@@ -1,14 +1,19 @@
+import { createRequire } from "node:module";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { KaseyaVsaxClient } from "@wyre-ai/node-kaseya-vsax";
 import { loadToolFlags, type ToolFlags } from "./config.js";
 import { createClient, getCredentials, type VsaxCredentials } from "./credentials.js";
 import { toSafeErrorMessage } from "./errors.js";
-import { MAX_RESULT_CHARS, MAX_TOOL_INPUT_ELEMENTS } from "./input-limits.js";
+import { MAX_RESULT_CHARS, MAX_TOOL_INPUT_ELEMENTS, toolInputTooLarge, toolInputTooLargeResult } from "./input-limits.js";
 import { annotationsFor, enabledTools, type ToolDef } from "./registry.js";
 import { TOOLS } from "./tools.js";
 
 export const SERVER_NAME = "kaseya-vsax-mcp";
-export const SERVER_VERSION = "0.0.0";
+// package.json sits one level above both src/ and dist/.
+export const SERVER_VERSION: string = (createRequire(import.meta.url)("../package.json") as { version: string }).version;
+
+export const SERVER_INSTRUCTIONS =
+  "All tools in this server are read-only: they list and get Kaseya VSA X data and never change anything.";
 
 export interface CreateServerOptions {
   /** Gateway-mode credentials. When omitted, env credentials are read per call. */
@@ -26,9 +31,15 @@ function errorResult(text: string) {
 function jsonResult(value: unknown) {
   let text = JSON.stringify(value ?? null, null, 2);
   if (text.length > MAX_RESULT_CHARS) {
-    text = `${text.slice(0, MAX_RESULT_CHARS)}\n…[truncated: result exceeded ${MAX_RESULT_CHARS} characters; narrow it with filter/top]`;
+    text = `${text.slice(0, MAX_RESULT_CHARS)}\n…[truncated: result exceeded ${MAX_RESULT_CHARS} characters; narrow it with filter or a smaller top, or for assets, fewer include sections]`;
   }
   return { content: [{ type: "text" as const, text }] };
+}
+
+/** Runs a tool handler after the element-count guard; oversize input never reaches the handler. */
+export async function dispatchTool(tool: ToolDef, client: KaseyaVsaxClient, args: Record<string, unknown>) {
+  if (toolInputTooLarge(args)) return toolInputTooLargeResult();
+  return jsonResult(await tool.handler({ client }, args));
 }
 
 /** Fresh server per request in HTTP mode (stateless); one per process on stdio. */
@@ -37,11 +48,11 @@ export function createMcpServer(options: CreateServerOptions = {}): McpServer {
   const build = options.clientFactory ?? createClient;
   const server = new McpServer(
     { name: SERVER_NAME, version: SERVER_VERSION },
-    { maxToolInputElements: MAX_TOOL_INPUT_ELEMENTS }
+    { instructions: SERVER_INSTRUCTIONS, maxToolInputElements: MAX_TOOL_INPUT_ELEMENTS }
   );
 
-  // One client per server so the SDK's auth circuit breaker state persists
-  // across calls on a long-lived stdio session.
+  // One client per server; breaker state itself lives in the shared store
+  // passed by createClient, so it also survives per-request servers.
   let cached: { key: string; client: KaseyaVsaxClient } | undefined;
   const clientFor = (creds: VsaxCredentials): KaseyaVsaxClient => {
     const key = `${creds.serverUrl}\n${creds.tokenId}\n${creds.tokenSecret}`;
@@ -62,11 +73,11 @@ export function createMcpServer(options: CreateServerOptions = {}): McpServer {
         const creds = options.credentials ?? getCredentials();
         if (!creds) {
           return errorResult(
-            "no VSA X credentials. Set KASEYA_VSAX_SERVER_URL, KASEYA_VSAX_TOKEN_ID and KASEYA_VSAX_TOKEN_SECRET, or pass the X-Kaseya-VSAX-* gateway headers."
+            "No Kaseya VSA X credentials are set. Set KASEYA_VSAX_SERVER_URL, KASEYA_VSAX_TOKEN_ID and KASEYA_VSAX_TOKEN_SECRET."
           );
         }
         try {
-          return jsonResult(await tool.handler({ client: clientFor(creds) }, args));
+          return await dispatchTool(tool, clientFor(creds), args);
         } catch (err) {
           return errorResult(toSafeErrorMessage(err, [creds.tokenSecret, creds.tokenId]));
         }
