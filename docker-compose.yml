@@ -1,0 +1,29 @@
+services:
+  # Gateway mode. Kaseya credentials arrive per request on X-Kaseya-VSAX-* headers.
+  # Do not set KASEYA_VSAX_SERVER_URL, KASEYA_VSAX_TOKEN_ID,
+  # KASEYA_VSAX_TOKEN_SECRET, or env_file here — that would put static vendor
+  # credentials in the container. Compose interpolates CONDUIT_S2S_SECRET from
+  # the project .env. For AUTH_MODE=env, pass those variables on that process
+  # instead (see the README).
+  kaseya-vsax-mcp:
+    build: .
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      # 0.0.0.0 is the interface inside the container. The port publish above
+      # stays on loopback. Startup still refuses to run without a real
+      # CONDUIT_S2S_SECRET.
+      - MCP_TRANSPORT=http
+      - MCP_HTTP_PORT=8080
+      - MCP_HTTP_HOST=0.0.0.0
+      - AUTH_MODE=gateway
+      # Phase 1 is read-only; writes (Phase 2) stay off unless both are opted in.
+      - READ_ONLY_MODE=true
+      - DESTRUCTIVE_TOOLS_ENABLED=false
+      - CONDUIT_S2S_SECRET=${CONDUIT_S2S_SECRET:?set CONDUIT_S2S_SECRET}
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s

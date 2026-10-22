@@ -1,0 +1,412 @@
+/**
+ * Phase 1 tool catalogue: read-only Kaseya VSA X tools.
+ * Every tool here is `access: "read"`; write tools belong in Phase 2 and must
+ * use `write` / `destructive` so the registry gates them.
+ */
+import { z } from "zod";
+import type { AssetSection } from "@wyre-ai/node-kaseya-vsax";
+import {
+  MAX_FILTER_LENGTH,
+  MAX_ID_LENGTH,
+  MAX_ORDERBY_LENGTH,
+} from "./input-limits.js";
+import { ToolInputError, type ToolDef } from "./registry.js";
+
+// ---------------------------------------------------------------------------
+// Shared input fragments
+// ---------------------------------------------------------------------------
+
+export const DEFAULT_TOP = 50;
+export const MAX_TOP = 100;
+const MAX_SKIP = 1_000_000;
+
+const id = (what: string) =>
+  z.union([z.string().min(1).max(MAX_ID_LENGTH), z.number().int().nonnegative()]).describe(what);
+const strId = (what: string) => z.string().min(1).max(MAX_ID_LENGTH).describe(what);
+
+const listShape = {
+  top: z.number().int().min(1).max(MAX_TOP).optional().describe(`Page size (default ${DEFAULT_TOP}, max ${MAX_TOP})`),
+  skip: z.number().int().min(0).max(MAX_SKIP).optional().describe("Records to skip"),
+  filter: z.string().max(MAX_FILTER_LENGTH).optional().describe("OData $filter expression"),
+  orderby: z.string().max(MAX_ORDERBY_LENGTH).optional().describe("OData $orderby expression"),
+};
+
+const ASSET_SECTIONS = [
+  "Tags",
+  "Updates",
+  "AvailableUpdates",
+  "Security",
+  "AssetInfo",
+  "IpAddresses",
+  "LocalIpAddresses",
+  "Disks",
+  "InstalledSoftware",
+  "None",
+] as const satisfies readonly AssetSection[];
+/** Slim default: the heavy sections (software, updates, security) are opt-in. */
+const DEFAULT_ASSET_SECTIONS: AssetSection[] = ["AssetInfo", "IpAddresses"];
+const includeShape = {
+  include: z
+    .array(z.enum(ASSET_SECTIONS))
+    .max(ASSET_SECTIONS.length)
+    .optional()
+    .describe(`Sections to include (default ${DEFAULT_ASSET_SECTIONS.join(",")}). InstalledSoftware, Updates, AvailableUpdates and Security are large.`),
+};
+
+interface ListArgs {
+  top?: number;
+  skip?: number;
+  filter?: string;
+  orderby?: string;
+}
+
+function listParams(a: ListArgs) {
+  return { top: a.top ?? DEFAULT_TOP, skip: a.skip, filter: a.filter, orderby: a.orderby };
+}
+
+/**
+ * Wrap a page of results. The SDK's list calls return the page only (the
+ * server's TotalCount is not surfaced), so totalCount is omitted and nextSkip
+ * is present exactly when the page was full.
+ */
+export function toPage(result: unknown, a: ListArgs): { items: unknown[]; nextSkip?: number } {
+  const items = Array.isArray(result) ? result : [];
+  const top = a.top ?? DEFAULT_TOP;
+  const skip = a.skip ?? 0;
+  return items.length >= top ? { items, nextSkip: skip + items.length } : { items };
+}
+
+type Args<T> = T & Record<string, unknown>;
+const a = <T>(args: Record<string, unknown>) => args as Args<T>;
+
+// ---------------------------------------------------------------------------
+// Tools
+// ---------------------------------------------------------------------------
+
+export const TOOLS: ToolDef[] = [
+  // ----- devices -----
+  {
+    name: "vsax_devices_list",
+    title: "List devices",
+    description: "List managed devices. Supports OData filter/orderby, paging and an optional scopeId.",
+    access: "read",
+    inputSchema: { ...listShape, scopeId: z.number().int().nonnegative().optional().describe("Restrict to this scope") },
+    handler: async ({ client }, args) => {
+      const p = a<ListArgs & { scopeId?: number }>(args);
+      return toPage(await client.devices.list({ ...listParams(p), scopeId: p.scopeId }), p);
+    },
+  },
+  {
+    name: "vsax_devices_get",
+    title: "Get device",
+    description: "Get one device by device ID.",
+    access: "read",
+    inputSchema: { deviceId: strId("Device ID") },
+    handler: ({ client }, args) => client.devices.get(a<{ deviceId: string }>(args).deviceId),
+  },
+  {
+    name: "vsax_devices_notifications_list",
+    title: "List device notifications",
+    description: "List notifications (alerts) raised for a device.",
+    access: "read",
+    inputSchema: { deviceId: strId("Device ID"), ...listShape },
+    handler: async ({ client }, args) => {
+      const p = a<ListArgs & { deviceId: string }>(args);
+      return toPage(await client.devices.notifications(p.deviceId, listParams(p)), p);
+    },
+  },
+  {
+    name: "vsax_devices_antivirus_get",
+    title: "Get device antivirus",
+    description: "Get antivirus / endpoint-protection status for a device.",
+    access: "read",
+    inputSchema: { deviceId: strId("Device ID") },
+    handler: ({ client }, args) => client.devices.antivirus(a<{ deviceId: string }>(args).deviceId),
+  },
+  {
+    name: "vsax_devices_custom_fields_list",
+    title: "List device custom fields",
+    description: "List custom field values assigned to a device.",
+    access: "read",
+    inputSchema: { deviceId: strId("Device ID") },
+    handler: async ({ client }, args) => ({
+      items: await client.devices.customFields(a<{ deviceId: string }>(args).deviceId),
+    }),
+  },
+  {
+    name: "vsax_devices_applied_policies_list",
+    title: "List device applied policies",
+    description: "List policies applied to a device.",
+    access: "read",
+    inputSchema: { deviceId: strId("Device ID") },
+    handler: async ({ client }, args) => ({
+      items: await client.devices.appliedPolicies(a<{ deviceId: string }>(args).deviceId),
+    }),
+  },
+
+  // ----- assets -----
+  {
+    name: "vsax_assets_list",
+    title: "List assets",
+    description: "List device assets (hardware/OS/network inventory). Heavy sections are opt-in via include.",
+    access: "read",
+    inputSchema: { ...listShape, ...includeShape },
+    handler: async ({ client }, args) => {
+      const p = a<ListArgs & { include?: AssetSection[] }>(args);
+      return toPage(await client.assets.list({ ...listParams(p), include: p.include ?? DEFAULT_ASSET_SECTIONS }), p);
+    },
+  },
+  {
+    name: "vsax_assets_get",
+    title: "Get asset",
+    description: "Get the asset record for a device. Heavy sections are opt-in via include.",
+    access: "read",
+    inputSchema: { deviceId: strId("Device ID"), ...includeShape },
+    handler: ({ client }, args) => {
+      const p = a<{ deviceId: string; include?: AssetSection[] }>(args);
+      return client.assets.get(p.deviceId, p.include ?? DEFAULT_ASSET_SECTIONS);
+    },
+  },
+
+  // ----- notifications -----
+  {
+    name: "vsax_notifications_list",
+    title: "List notifications",
+    description: "List notifications (alerts) across the tenant.",
+    access: "read",
+    inputSchema: listShape,
+    handler: async ({ client }, args) => toPage(await client.notifications.list(listParams(a<ListArgs>(args))), a<ListArgs>(args)),
+  },
+  {
+    name: "vsax_notifications_get",
+    title: "Get notification",
+    description: "Get one notification by ID.",
+    access: "read",
+    inputSchema: { notificationId: id("Notification ID") },
+    handler: ({ client }, args) => client.notifications.get(a<{ notificationId: string | number }>(args).notificationId),
+  },
+
+  // ----- organizations / sites / groups -----
+  {
+    name: "vsax_organizations_list",
+    title: "List organizations",
+    description: "List organizations.",
+    access: "read",
+    inputSchema: listShape,
+    handler: async ({ client }, args) => toPage(await client.organizations.list(listParams(a<ListArgs>(args))), a<ListArgs>(args)),
+  },
+  {
+    name: "vsax_organizations_get",
+    title: "Get organization",
+    description: "Get one organization by ID.",
+    access: "read",
+    inputSchema: { organizationId: id("Organization ID") },
+    handler: ({ client }, args) => client.organizations.get(a<{ organizationId: string | number }>(args).organizationId),
+  },
+  {
+    name: "vsax_sites_list",
+    title: "List sites",
+    description: "List sites.",
+    access: "read",
+    inputSchema: listShape,
+    handler: async ({ client }, args) => toPage(await client.sites.list(listParams(a<ListArgs>(args))), a<ListArgs>(args)),
+  },
+  {
+    name: "vsax_sites_get",
+    title: "Get site",
+    description: "Get one site by ID.",
+    access: "read",
+    inputSchema: { siteId: id("Site ID") },
+    handler: ({ client }, args) => client.sites.get(a<{ siteId: string | number }>(args).siteId),
+  },
+  {
+    name: "vsax_groups_list",
+    title: "List groups",
+    description: "List device groups.",
+    access: "read",
+    inputSchema: listShape,
+    handler: async ({ client }, args) => toPage(await client.groups.list(listParams(a<ListArgs>(args))), a<ListArgs>(args)),
+  },
+  {
+    name: "vsax_groups_get",
+    title: "Get group",
+    description: "Get one group by ID.",
+    access: "read",
+    inputSchema: { groupId: id("Group ID") },
+    handler: ({ client }, args) => client.groups.get(a<{ groupId: string | number }>(args).groupId),
+  },
+
+  // ----- custom fields / scopes -----
+  {
+    name: "vsax_custom_fields_list",
+    title: "List custom fields",
+    description:
+      "List custom field definitions. With entityType + entityId, list the custom field values assigned to that organization, site, group or device instead.",
+    access: "read",
+    inputSchema: {
+      ...listShape,
+      entityType: z.enum(["organization", "site", "group", "device"]).optional().describe("Read this entity's custom fields"),
+      entityId: id("Entity ID (required with entityType)").optional(),
+    },
+    handler: async ({ client }, args) => {
+      const p = a<ListArgs & { entityType?: "organization" | "site" | "group" | "device"; entityId?: string | number }>(args);
+      if (!p.entityType) {
+        if (p.entityId !== undefined) throw new ToolInputError("entityId requires entityType");
+        return toPage(await client.customFields.list(listParams(p)), p);
+      }
+      if (p.entityId === undefined) throw new ToolInputError("entityType requires entityId");
+      switch (p.entityType) {
+        case "organization":
+          return { items: await client.organizations.customFields(p.entityId) };
+        case "site":
+          return { items: await client.sites.customFields(p.entityId) };
+        case "group":
+          return { items: await client.groups.customFields(p.entityId) };
+        case "device":
+          return { items: await client.devices.customFields(String(p.entityId)) };
+      }
+    },
+  },
+  {
+    name: "vsax_scopes_list",
+    title: "List scopes",
+    description: "List scopes.",
+    access: "read",
+    inputSchema: listShape,
+    handler: async ({ client }, args) => toPage(await client.scopes.list(listParams(a<ListArgs>(args))), a<ListArgs>(args)),
+  },
+
+  // ----- automation -----
+  {
+    name: "vsax_scripts_list",
+    title: "List or get scripts",
+    description: "List automation scripts, or get one when scriptId is given.",
+    access: "read",
+    inputSchema: { ...listShape, scriptId: strId("Return this script only").optional() },
+    handler: async ({ client }, args) => {
+      const p = a<ListArgs & { scriptId?: string }>(args);
+      if (p.scriptId) return client.automation.scripts.get(p.scriptId);
+      return toPage(await client.automation.scripts.list(listParams(p)), p);
+    },
+  },
+  {
+    name: "vsax_script_executions_list",
+    title: "List script executions",
+    description: "List executions of a script on a device, or get one when executionId is given.",
+    access: "read",
+    inputSchema: {
+      ...listShape,
+      scriptId: strId("Script ID"),
+      deviceId: strId("Device ID"),
+      executionId: id("Return this execution only").optional(),
+    },
+    handler: async ({ client }, args) => {
+      const p = a<ListArgs & { scriptId: string; deviceId: string; executionId?: string | number }>(args);
+      if (p.executionId !== undefined) {
+        return client.automation.scripts.executions.get(p.scriptId, p.deviceId, p.executionId);
+      }
+      return toPage(await client.automation.scripts.executions.list(p.scriptId, p.deviceId, listParams(p)), p);
+    },
+  },
+  {
+    name: "vsax_tasks_list",
+    title: "List or get tasks",
+    description: "List automation tasks, or get one when taskId is given.",
+    access: "read",
+    inputSchema: { ...listShape, taskId: id("Return this task only").optional() },
+    handler: async ({ client }, args) => {
+      const p = a<ListArgs & { taskId?: string | number }>(args);
+      if (p.taskId !== undefined) return client.automation.tasks.get(p.taskId);
+      return toPage(await client.automation.tasks.list(listParams(p)), p);
+    },
+  },
+  {
+    name: "vsax_task_executions_get",
+    title: "Get task execution",
+    description:
+      "Get a task execution and its devices. With deviceId, list the scripts that ran on that device; with deviceId + scriptId, get the script output.",
+    access: "read",
+    inputSchema: {
+      executionId: id("Task execution ID"),
+      deviceId: strId("Device ID").optional(),
+      scriptId: strId("Script ID (requires deviceId)").optional(),
+    },
+    handler: async ({ client }, args) => {
+      const p = a<{ executionId: string | number; deviceId?: string; scriptId?: string }>(args);
+      const tasks = client.automation.tasks;
+      if (p.scriptId && !p.deviceId) throw new ToolInputError("scriptId requires deviceId");
+      if (p.deviceId && p.scriptId) return tasks.scriptOutput(p.executionId, p.deviceId, p.scriptId);
+      if (p.deviceId) return { items: await tasks.executionDeviceScripts(p.executionId, p.deviceId) };
+      const [execution, devices] = await Promise.all([
+        tasks.getExecution(p.executionId),
+        tasks.executionDevices(p.executionId, { top: DEFAULT_TOP }),
+      ]);
+      return { execution, devices };
+    },
+  },
+  {
+    name: "vsax_workflows_list",
+    title: "List or get workflows",
+    description: "List automation workflows, or get one when workflowId is given.",
+    access: "read",
+    inputSchema: { ...listShape, workflowId: id("Return this workflow only").optional() },
+    handler: async ({ client }, args) => {
+      const p = a<ListArgs & { workflowId?: string | number }>(args);
+      if (p.workflowId !== undefined) return client.automation.workflows.get(p.workflowId);
+      return toPage(await client.automation.workflows.list(listParams(p)), p);
+    },
+  },
+  {
+    name: "vsax_workflow_executions_list",
+    title: "List workflow executions",
+    description: "List workflow executions, or get one when executionId is given.",
+    access: "read",
+    inputSchema: { ...listShape, executionId: id("Return this execution only").optional() },
+    handler: async ({ client }, args) => {
+      const p = a<ListArgs & { executionId?: string | number }>(args);
+      if (p.executionId !== undefined) return client.automation.workflows.executions.get(p.executionId);
+      return toPage(await client.automation.workflows.executions.list(listParams(p)), p);
+    },
+  },
+
+  // ----- policies / audit / environment -----
+  {
+    name: "vsax_patch_policies_get",
+    title: "Get patch policy",
+    description: "Get a patch management policy by policyId, or the global patch rules when policyId is omitted or globalRules is true.",
+    access: "read",
+    inputSchema: {
+      policyId: id("Patch policy ID").optional(),
+      globalRules: z.boolean().optional().describe("Return the global patch rules"),
+    },
+    handler: ({ client }, args) => {
+      const p = a<{ policyId?: string | number; globalRules?: boolean }>(args);
+      if (p.globalRules || p.policyId === undefined) return client.patchManagement.getGlobalRules();
+      return client.patchManagement.getPolicy(p.policyId);
+    },
+  },
+  {
+    name: "vsax_endpoint_protection_policies_get",
+    title: "Get endpoint protection policy",
+    description: "Get an endpoint protection policy by ID.",
+    access: "read",
+    inputSchema: { policyId: id("Endpoint protection policy ID") },
+    handler: ({ client }, args) => client.endpointProtection.getPolicy(a<{ policyId: string | number }>(args).policyId),
+  },
+  {
+    name: "vsax_audit_logs_list",
+    title: "List audit logs",
+    description: "List audit log entries.",
+    access: "read",
+    inputSchema: listShape,
+    handler: async ({ client }, args) => toPage(await client.auditLogs.list(listParams(a<ListArgs>(args))), a<ListArgs>(args)),
+  },
+  {
+    name: "vsax_environment_get",
+    title: "Get environment",
+    description: "Get VSA X environment information (version, tenant).",
+    access: "read",
+    inputSchema: {},
+    handler: ({ client }) => client.environment.get(),
+  },
+];
