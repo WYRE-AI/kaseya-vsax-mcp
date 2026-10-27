@@ -1,0 +1,74 @@
+# Multi-stage build for efficient container size
+FROM node:26-alpine AS builder
+
+ARG VERSION="unknown"
+ARG COMMIT_SHA="unknown"
+ARG BUILD_DATE="unknown"
+
+WORKDIR /app
+
+COPY package*.json ./
+
+# Install dependencies using Docker build secret for GitHub Packages auth
+RUN --mount=type=secret,id=npmrc,target=/root/.npmrc npm ci --ignore-scripts
+
+COPY . .
+
+RUN npm run build
+
+# Prune dev dependencies in builder stage (must happen here while npmrc secret is available)
+RUN --mount=type=secret,id=npmrc,target=/root/.npmrc npm prune --omit=dev
+
+# Production stage
+FROM node:26-alpine AS production
+
+RUN addgroup -g 1001 -S kaseya && \
+    adduser -S kaseya -u 1001 -G kaseya
+
+WORKDIR /app
+
+COPY package*.json ./
+COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/node_modules ./node_modules
+
+RUN npm cache clean --force
+
+RUN mkdir -p /app/logs && chown -R kaseya:kaseya /app
+
+USER kaseya
+
+EXPOSE 8080
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+  CMD wget --no-verbose --tries=1 --spider http://localhost:8080/health || exit 1
+
+ENV NODE_ENV=production
+ENV MCP_TRANSPORT=http
+ENV MCP_HTTP_PORT=8080
+# All interfaces inside the container. Startup still refuses to run without a
+# real CONDUIT_S2S_SECRET. MCP_ALLOW_INSECURE_DEV=1 forces 127.0.0.1 even
+# while this host is 0.0.0.0.
+ENV MCP_HTTP_HOST=0.0.0.0
+# Gateway mode reads Kaseya VSA X credentials from X-Kaseya-VSAX-* headers only.
+ENV AUTH_MODE=gateway
+
+CMD ["node", "dist/index.js"]
+
+ARG VERSION="unknown"
+ARG COMMIT_SHA="unknown"
+ARG BUILD_DATE="unknown"
+
+LABEL maintainer="engineering@wyre.ai"
+LABEL version="${VERSION}"
+LABEL description="Kaseya VSA X MCP Server - Model Context Protocol server for Kaseya VSA X (VSA 10)"
+LABEL org.opencontainers.image.title="kaseya-vsax-mcp"
+LABEL org.opencontainers.image.description="Model Context Protocol server for Kaseya VSA X (VSA 10)"
+LABEL org.opencontainers.image.version="${VERSION}"
+LABEL org.opencontainers.image.created="${BUILD_DATE}"
+LABEL org.opencontainers.image.revision="${COMMIT_SHA}"
+LABEL org.opencontainers.image.source="https://github.com/WYRE-AI/kaseya-vsax-mcp"
+LABEL org.opencontainers.image.documentation="https://github.com/WYRE-AI/kaseya-vsax-mcp/blob/main/README.md"
+LABEL org.opencontainers.image.url="https://github.com/WYRE-AI/kaseya-vsax-mcp/pkgs/container/kaseya-vsax-mcp"
+LABEL org.opencontainers.image.vendor="WYRE AI"
+LABEL org.opencontainers.image.licenses="Apache-2.0"
+LABEL io.modelcontextprotocol.server.name="io.github.WYRE-AI/kaseya-vsax-mcp"

@@ -1,0 +1,70 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.WYRE-AI/kaseya-vsax-mcp",
+  "title": "Kaseya VSA X",
+  "description": "Read-only MCP server for Kaseya VSA X (VSA 10) \u2014 devices, assets, notifications, organizations, automation, patching.",
+  "repository": {
+    "url": "https://github.com/WYRE-AI/kaseya-vsax-mcp",
+    "source": "github"
+  },
+  "version": "0.0.0",
+  "websiteUrl": "https://github.com/WYRE-AI/kaseya-vsax-mcp",
+  "packages": [
+    {
+      "registryType": "oci",
+      "identifier": "ghcr.io/wyre-ai/kaseya-vsax-mcp:0.0.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "KASEYA_VSAX_SERVER_URL",
+          "description": "Tenant host, e.g. acme.vsax.net (must be a single label under .vsax.net)",
+          "isRequired": true,
+          "format": "string"
+        },
+        {
+          "name": "KASEYA_VSAX_TOKEN_ID",
+          "description": "API Token ID (Configuration > API Access > Third-Party Tokens)",
+          "isRequired": true,
+          "format": "string"
+        },
+        {
+          "name": "KASEYA_VSAX_TOKEN_SECRET",
+          "description": "API Token Secret",
+          "isRequired": true,
+          "isSecret": true,
+          "format": "string"
+        },
+        {
+          "name": "READ_ONLY_MODE",
+          "description": "Expose read tools only. Default true.",
+          "isRequired": false,
+          "default": "true",
+          "format": "string"
+        },
+        {
+          "name": "DESTRUCTIVE_TOOLS_ENABLED",
+          "description": "Allow destructive tools (only effective when READ_ONLY_MODE=false). Default false.",
+          "isRequired": false,
+          "default": "false",
+          "format": "string"
+        },
+        {
+          "name": "MCP_TRANSPORT",
+          "description": "Transport mode. 'stdio' for local CLI use; the image defaults to 'http' for gateway hosting.",
+          "isRequired": false,
+          "default": "stdio",
+          "format": "string"
+        },
+        {
+          "name": "AUTH_MODE",
+          "description": "Credential source: 'env' reads the KASEYA_VSAX_* variables; 'gateway' expects them in X-Kaseya-VSAX-* headers from the WYRE AI gateway.",
+          "isRequired": false,
+          "default": "env",
+          "format": "string"
+        }
+      ]
+    }
+  ]
+}

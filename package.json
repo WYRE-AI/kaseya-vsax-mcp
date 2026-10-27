@@ -1,0 +1,66 @@
+{
+  "name": "@wyre-ai/kaseya-vsax-mcp",
+  "version": "0.0.0",
+  "description": "Kaseya VSA X (VSA 10) MCP server \u2014 devices, assets, notifications, organizations, automation, patching (read-only)",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "kaseya-vsax-mcp": "./dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "start": "node dist/index.js",
+    "lint": "eslint src",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/WYRE-AI/kaseya-vsax-mcp.git"
+  },
+  "keywords": [
+    "mcp",
+    "claude",
+    "kaseya",
+    "vsa-x",
+    "vsa10",
+    "rmm",
+    "msp"
+  ],
+  "author": "WYRE AI",
+  "license": "Apache-2.0",
+  "bugs": {
+    "url": "https://github.com/WYRE-AI/kaseya-vsax-mcp/issues"
+  },
+  "homepage": "https://github.com/WYRE-AI/kaseya-vsax-mcp#readme",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.31.0",
+    "@wyre-ai/node-kaseya-vsax": "^1.0.0",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@semantic-release/changelog": "^7.0.0",
+    "@semantic-release/git": "^11.0.1",
+    "@semantic-release/github": "^12.0.10",
+    "@types/node": "^26.6.4",
+    "eslint": "^10.11.0",
+    "globals": "^17.13.0",
+    "semantic-release": "^25.0.9",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.71.0",
+    "vitest": "^5.0.3"
+  },
+  "engines": {
+    "node": ">=22.14.0"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  }
+}
