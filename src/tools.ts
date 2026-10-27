@@ -127,7 +127,7 @@ export const TOOLS: ToolDef[] = [
     inputSchema: { deviceId: strId("Device Identifier (from vsax_devices_list)") },
     handler: async ({ client }, args) => {
       const data = await client.devices.antivirus(a<{ deviceId: string }>(args).deviceId);
-      return data ?? { message: "No antivirus data for this device." };
+      return data ?? { message: "No antivirus data for this device. Antivirus may not be installed, or it hasn't reported yet. Check the device in VSA X." };
     },
   },
   {
@@ -331,11 +331,11 @@ export const TOOLS: ToolDef[] = [
     name: "vsax_task_executions_get",
     title: "Get task execution",
     description:
-      "Get a task execution and its devices. The executionId is the Id returned when a task is run, also shown in the task's Execution History in VSA X. Without deviceId, returns the first 50 devices only. With deviceId, list the scripts that ran on that device; with deviceId + scriptId, get the script output. Read-only.",
+      "Get a task execution and its devices (first 50 only). Add deviceId to list the scripts that ran on that device, and scriptId to get a script's output. Use the execution ID from a task run or the task's Execution History in VSA X. Read-only.",
     access: "read",
     inputSchema: {
       // Looser than id(): the handler validates, so every bad value gets the same fix-it message.
-      executionId: z.union([z.string().min(1).max(MAX_ID_LENGTH), z.number()]).describe("Task execution ID (the Id returned when a task is run)"),
+      executionId: z.union([z.string().min(1).max(MAX_ID_LENGTH), z.number()]).describe("Task execution ID (the ID returned when a task is run)"),
       deviceId: strId("Device Identifier (from vsax_devices_list)").optional(),
       scriptId: strId("Script ID (requires deviceId)").optional(),
     },

@@ -235,7 +235,7 @@ describe("argument mapping", () => {
     for (const empty of [null, undefined]) {
       fake.devices.antivirus.mockResolvedValue(empty);
       const r = await call("vsax_devices_antivirus_get", { deviceId: "d" });
-      expect(r.json).toEqual({ message: "No antivirus data for this device." });
+      expect(r.json).toEqual({ message: "No antivirus data for this device. Antivirus may not be installed, or it hasn't reported yet. Check the device in VSA X." });
     }
     fake.devices.antivirus.mockResolvedValue({ Name: "Defender" });
     expect((await call("vsax_devices_antivirus_get", { deviceId: "d" })).json).toEqual({ Name: "Defender" });
@@ -330,7 +330,7 @@ describe("error mapping", () => {
     const m = (path: string) => toSafeErrorMessage(new KaseyaVsaxServerError("x", { status: 500, path }), secrets);
     const notFound = "No task execution found with that ID. Use an execution ID from a task run, then try again.";
     const notFoundDevice =
-      "No task execution found for that execution ID and device. Use an execution ID from a task run and a device Identifier from that run, then try again.";
+      "No task execution found for that execution ID and device. Use an execution ID from a task run and a device `Identifier` from that run, then try again.";
     expect(m("/automation/tasks/executions/123")).toBe(notFound);
     expect(m("/automation/tasks/executions/123/devices")).toBe(notFound);
     expect(m("/automation/tasks/executions/123?top=50")).toBe(notFound);

@@ -71,7 +71,7 @@ export function toSafeErrorMessage(err: unknown, secrets: readonly string[] = []
           return "No task execution found with that ID. Use an execution ID from a task run, then try again.";
         }
         if (/^\/automation\/tasks\/executions\/[^/]+\/devices\/[^/]+\/scripts(\/[^/]+)?$/.test(path)) {
-          return "No task execution found for that execution ID and device. Use an execution ID from a task run and a device Identifier from that run, then try again.";
+          return "No task execution found for that execution ID and device. Use an execution ID from a task run and a device `Identifier` from that run, then try again.";
         }
         return "Kaseya VSA X had a server error. Try again in a minute.";
       }

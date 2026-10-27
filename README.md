@@ -32,7 +32,7 @@ full page came back; the API's total count is not exposed by the SDK).
 | `vsax_devices_list` | List devices (optional `scopeId`). |
 | `vsax_devices_get` | Get a device by ID. |
 | `vsax_devices_notifications_list` | Notifications raised for a device. |
-| `vsax_devices_antivirus_get` | Antivirus status for a device; returns `{ "message": "No antivirus data for this device." }` when VSA X has none. |
+| `vsax_devices_antivirus_get` | Antivirus status for a device; returns `{ "message": "No antivirus data for this device. Antivirus may not be installed, or it hasn't reported yet. Check the device in VSA X." }` when VSA X has none. |
 | `vsax_devices_custom_fields_list` | Custom field values on a device. |
 | `vsax_devices_applied_policies_list` | Policies applied to a device. |
 | `vsax_assets_list` | Asset inventory. `include` picks sections; default is slim (`AssetInfo`, `IpAddresses`), and an empty `include` also gives the slim default. |
@@ -46,7 +46,7 @@ full page came back; the API's total count is not exposed by the SDK).
 | `vsax_scripts_list` | Automation scripts; `scriptId` returns one. |
 | `vsax_script_executions_list` | Executions of `scriptId` on `deviceId`; `executionId` returns one. |
 | `vsax_tasks_list` | Automation tasks; `taskId` returns one. |
-| `vsax_task_executions_get` | A task execution and its devices; `deviceId` lists its scripts; `deviceId` + `scriptId` returns script output. `executionId` is the Id returned when a task is run (also in the task's Execution History in VSA X) and must be a positive whole number. |
+| `vsax_task_executions_get` | A task execution and its devices; `deviceId` lists its scripts; `deviceId` + `scriptId` returns script output. `executionId` is the ID returned when a task is run (also in the task's Execution History in VSA X) and must be a positive whole number. |
 | `vsax_workflows_list` | Workflows; `workflowId` returns one. |
 | `vsax_workflow_executions_list` | Workflow executions; `executionId` returns one. |
 | `vsax_patch_policies_get` | A patch policy by `policyId`; global patch rules when omitted or `globalRules: true`. |
