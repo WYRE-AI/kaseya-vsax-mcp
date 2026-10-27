@@ -193,6 +193,54 @@ describe("argument mapping", () => {
     expect((await call("vsax_task_executions_get", { executionId: 9, scriptId: "s" })).isError).toBe(true);
   });
 
+  it("task_executions_get rejects invalid execution IDs before any request", async () => {
+    const { call, fake } = await connect();
+    const t = fake.automation.tasks;
+    const message =
+      "executionId must be a task execution ID, a whole number like 1234. Run a task to get one, or copy it from the task's Execution History in VSA X.";
+    for (const executionId of ["abc", "0", "01", -1, 1.5, "12a", 0]) {
+      for (const extra of [{}, { deviceId: "d" }, { deviceId: "d", scriptId: "s" }]) {
+        const r = await call("vsax_task_executions_get", { executionId, ...extra });
+        expect(r.isError).toBe(true);
+        expect(r.text).toBe(`Error: ${message}`);
+      }
+    }
+    for (const fn of [t.getExecution, t.executionDevices, t.executionDeviceScripts, t.scriptOutput]) {
+      expect(fn).not.toHaveBeenCalled();
+    }
+  });
+
+  it("task_executions_get accepts string and number execution IDs", async () => {
+    const { call, fake } = await connect();
+    const t = fake.automation.tasks;
+    expect((await call("vsax_task_executions_get", { executionId: "1234" })).isError).toBe(false);
+    expect(t.getExecution).toHaveBeenLastCalledWith("1234");
+    expect((await call("vsax_task_executions_get", { executionId: 1234 })).isError).toBe(false);
+    expect(t.getExecution).toHaveBeenLastCalledWith(1234);
+  });
+
+  it("task_executions_get does not request devices when the execution lookup fails", async () => {
+    const { call, fake } = await connect();
+    fake.automation.tasks.getExecution.mockRejectedValue(
+      new KaseyaVsaxServerError("boom", { status: 500, path: "/automation/tasks/executions/999999999" })
+    );
+    const r = await call("vsax_task_executions_get", { executionId: 999999999 });
+    expect(r.isError).toBe(true);
+    expect(r.text).toBe("Error: No task execution found with that ID. Use an execution ID from a task run, then try again.");
+    expect(fake.automation.tasks.executionDevices).not.toHaveBeenCalled();
+  });
+
+  it("antivirus_get returns a message for null/undefined and passes data through", async () => {
+    const { call, fake } = await connect();
+    for (const empty of [null, undefined]) {
+      fake.devices.antivirus.mockResolvedValue(empty);
+      const r = await call("vsax_devices_antivirus_get", { deviceId: "d" });
+      expect(r.json).toEqual({ message: "No antivirus data for this device." });
+    }
+    fake.devices.antivirus.mockResolvedValue({ Name: "Defender" });
+    expect((await call("vsax_devices_antivirus_get", { deviceId: "d" })).json).toEqual({ Name: "Defender" });
+  });
+
   it("scripts / script executions / patch policies pick the right SDK call", async () => {
     const { call, fake } = await connect();
     await call("vsax_scripts_list", { scriptId: "sc1" });
@@ -276,6 +324,19 @@ describe("error mapping", () => {
     }
     expect(m("SERVER_ERROR")).toBe("Kaseya VSA X had a server error. Try again in a minute.");
     expect(m("NETWORK_ERROR")).toMatch(/^Couldn't reach Kaseya VSA X/);
+  });
+
+  it("maps SERVER_ERROR on task execution paths to not-found messages", () => {
+    const m = (path: string) => toSafeErrorMessage(new KaseyaVsaxServerError("x", { status: 500, path }), secrets);
+    const notFound = "No task execution found with that ID. Use an execution ID from a task run, then try again.";
+    const notFoundDevice =
+      "No task execution found for that execution ID and device. Use an execution ID from a task run and a device Identifier from that run, then try again.";
+    expect(m("/automation/tasks/executions/123")).toBe(notFound);
+    expect(m("/automation/tasks/executions/123/devices")).toBe(notFound);
+    expect(m("/automation/tasks/executions/123?top=50")).toBe(notFound);
+    expect(m("/automation/tasks/executions/123/devices/d1/scripts")).toBe(notFoundDevice);
+    expect(m("/automation/tasks/executions/123/devices/d1/scripts/s1")).toBe(notFoundDevice);
+    expect(m("/devices/abc")).toBe("Kaseya VSA X had a server error. Try again in a minute.");
   });
 
   it("logs only the error name for unexpected errors", () => {

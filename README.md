@@ -32,7 +32,7 @@ full page came back; the API's total count is not exposed by the SDK).
 | `vsax_devices_list` | List devices (optional `scopeId`). |
 | `vsax_devices_get` | Get a device by ID. |
 | `vsax_devices_notifications_list` | Notifications raised for a device. |
-| `vsax_devices_antivirus_get` | Antivirus status for a device. |
+| `vsax_devices_antivirus_get` | Antivirus status for a device; returns `{ "message": "No antivirus data for this device." }` when VSA X has none. |
 | `vsax_devices_custom_fields_list` | Custom field values on a device. |
 | `vsax_devices_applied_policies_list` | Policies applied to a device. |
 | `vsax_assets_list` | Asset inventory. `include` picks sections; default is slim (`AssetInfo`, `IpAddresses`), and an empty `include` also gives the slim default. |
@@ -46,7 +46,7 @@ full page came back; the API's total count is not exposed by the SDK).
 | `vsax_scripts_list` | Automation scripts; `scriptId` returns one. |
 | `vsax_script_executions_list` | Executions of `scriptId` on `deviceId`; `executionId` returns one. |
 | `vsax_tasks_list` | Automation tasks; `taskId` returns one. |
-| `vsax_task_executions_get` | A task execution and its devices; `deviceId` lists its scripts; `deviceId` + `scriptId` returns script output. |
+| `vsax_task_executions_get` | A task execution and its devices; `deviceId` lists its scripts; `deviceId` + `scriptId` returns script output. `executionId` is the Id returned when a task is run (also in the task's Execution History in VSA X) and must be a positive whole number. |
 | `vsax_workflows_list` | Workflows; `workflowId` returns one. |
 | `vsax_workflow_executions_list` | Workflow executions; `executionId` returns one. |
 | `vsax_patch_policies_get` | A patch policy by `policyId`; global patch rules when omitted or `globalRules: true`. |
@@ -56,6 +56,8 @@ full page came back; the API's total count is not exposed by the SDK).
 
 Group install-package downloads, webhooks and rate-limit endpoints are
 deliberately not exposed.
+
+VSA X rate limits (requests per hour and failed requests per minute) vary by tenant; when one is reached, the tool error says how long to wait.
 
 ## Configuration
 
@@ -117,7 +119,7 @@ Those headers are the only credential source for that request. Missing headers r
 - **Read-only by default**: only `readOnlyHint` tools are registered; write tools (Phase 2) are gated by `READ_ONLY_MODE` / `DESTRUCTIVE_TOOLS_ENABLED`.
 - **Fail-closed S2S** on HTTP; `/health` is the only unauthenticated route.
 - **SSRF / credential-exfiltration guard**: the SDK only sends credentials to `<one-label>.vsax.net` over HTTPS.
-- **Secrets are never logged or returned.** SDK errors are mapped to fixed, safe messages (403 names the endpoint and points to Configuration > API Access > Third-Party Tokens; 401 "didn't accept the API token"; circuit open "rejected the API token twice in a row, so requests are paused for N minutes"; 429 says how long to wait). Unknown errors are not passed through.
+- **Secrets are never logged or returned.** SDK errors are mapped to fixed, safe messages (403 names the endpoint and points to Configuration > API Access > Third-Party Tokens; 401 "didn't accept the API token"; circuit open "rejected the API token twice in a row, so requests are paused for N minutes"; 429 says how long to wait; the HTTP 500 VSA X returns for an unknown task execution ID becomes "No task execution found"). Unknown errors are not passed through.
 - **Input limits**: request bodies over 256 KiB get a 413 JSON-RPC error before parsing and the transport enforces the same `maxRequestBodySize`; tool inputs are limited to 10,000 elements; every tool schema caps string lengths (IDs 128, filter 1000, orderby 200), `top` (100) and array sizes. Tool results are truncated at 200,000 characters.
 
 ## Local development

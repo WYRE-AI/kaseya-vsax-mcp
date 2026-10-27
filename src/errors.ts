@@ -64,8 +64,17 @@ export function toSafeErrorMessage(err: unknown, secrets: readonly string[] = []
         return err.detail
           ? scrub(`Kaseya VSA X rejected the request: ${sentence(err.detail)}. Check the filter, orderby and ID values.`)
           : "Kaseya VSA X rejected the request. Check the filter, orderby and ID values.";
-      case "SERVER_ERROR":
+      case "SERVER_ERROR": {
+        // VSA X answers an unknown task execution ID with HTTP 500 rather than 404.
+        const path = (err.path ?? "").split("?")[0];
+        if (/^\/automation\/tasks\/executions\/[^/]+(\/devices)?$/.test(path)) {
+          return "No task execution found with that ID. Use an execution ID from a task run, then try again.";
+        }
+        if (/^\/automation\/tasks\/executions\/[^/]+\/devices\/[^/]+\/scripts(\/[^/]+)?$/.test(path)) {
+          return "No task execution found for that execution ID and device. Use an execution ID from a task run and a device Identifier from that run, then try again.";
+        }
         return "Kaseya VSA X had a server error. Try again in a minute.";
+      }
       case "NETWORK_ERROR":
         return "Couldn't reach Kaseya VSA X. Check the server URL and this server's network access, and the token's IP allowlist if it has one.";
       case "REDIRECT_REFUSED":

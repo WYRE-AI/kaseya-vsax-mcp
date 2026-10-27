@@ -125,7 +125,10 @@ export const TOOLS: ToolDef[] = [
     description: "Get antivirus / endpoint-protection status for a device. Read-only.",
     access: "read",
     inputSchema: { deviceId: strId("Device Identifier (from vsax_devices_list)") },
-    handler: ({ client }, args) => client.devices.antivirus(a<{ deviceId: string }>(args).deviceId),
+    handler: async ({ client }, args) => {
+      const data = await client.devices.antivirus(a<{ deviceId: string }>(args).deviceId);
+      return data ?? { message: "No antivirus data for this device." };
+    },
   },
   {
     name: "vsax_devices_custom_fields_list",
@@ -328,23 +331,27 @@ export const TOOLS: ToolDef[] = [
     name: "vsax_task_executions_get",
     title: "Get task execution",
     description:
-      "Get a task execution and its devices. Without deviceId, returns the first 50 devices only. With deviceId, list the scripts that ran on that device; with deviceId + scriptId, get the script output. Read-only.",
+      "Get a task execution and its devices. The executionId is the Id returned when a task is run, also shown in the task's Execution History in VSA X. Without deviceId, returns the first 50 devices only. With deviceId, list the scripts that ran on that device; with deviceId + scriptId, get the script output. Read-only.",
     access: "read",
     inputSchema: {
-      executionId: id("Task execution ID"),
+      // Looser than id(): the handler validates, so every bad value gets the same fix-it message.
+      executionId: z.union([z.string().min(1).max(MAX_ID_LENGTH), z.number()]).describe("Task execution ID (the Id returned when a task is run)"),
       deviceId: strId("Device Identifier (from vsax_devices_list)").optional(),
       scriptId: strId("Script ID (requires deviceId)").optional(),
     },
     handler: async ({ client }, args) => {
       const p = a<{ executionId: string | number; deviceId?: string; scriptId?: string }>(args);
       const tasks = client.automation.tasks;
+      const validId =
+        typeof p.executionId === "number"
+          ? Number.isSafeInteger(p.executionId) && p.executionId > 0
+          : /^[1-9][0-9]{0,17}$/.test(p.executionId);
+      if (!validId) throw new ToolInputError("executionId must be a task execution ID, a whole number like 1234. Run a task to get one, or copy it from the task's Execution History in VSA X.");
       if (p.scriptId && !p.deviceId) throw new ToolInputError("scriptId needs deviceId too. Pass the device's Identifier, which you can get by calling this tool with deviceId only to list its scripts.");
       if (p.deviceId && p.scriptId) return tasks.scriptOutput(p.executionId, p.deviceId, p.scriptId);
       if (p.deviceId) return { items: await tasks.executionDeviceScripts(p.executionId, p.deviceId) };
-      const [execution, devices] = await Promise.all([
-        tasks.getExecution(p.executionId),
-        tasks.executionDevices(p.executionId, { top: DEFAULT_TOP }),
-      ]);
+      const execution = await tasks.getExecution(p.executionId);
+      const devices = await tasks.executionDevices(p.executionId, { top: DEFAULT_TOP });
       return { execution, devices };
     },
   },

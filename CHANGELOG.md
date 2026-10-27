@@ -14,5 +14,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fail-closed service-to-service auth: HTTP refuses to start when `CONDUIT_S2S_SECRET` is empty or a known placeholder, unless `MCP_ALLOW_INSECURE_DEV=1` (which forces `127.0.0.1`). `/health` is unauthenticated.
 - `READ_ONLY_MODE` (default `true`) and `DESTRUCTIVE_TOOLS_ENABLED` (default `false`) flags plus a small tool registry so Phase 2 write tools can be gated. No write tools are registered in Phase 1.
 - Input limits: `Content-Length` above 256 KiB returns a 413 JSON-RPC error before parsing, `maxRequestBodySize` on the transport, `maxToolInputElements` on the server, and per-field string/array caps in every tool schema.
+- `vsax_task_executions_get` validates `executionId` (positive whole number) before any request and looks up the execution before its devices. The HTTP 500 VSA X returns for an unknown task execution ID maps to a "No task execution found" error. `vsax_devices_antivirus_get` returns a message when there is no antivirus data.
 - SDK errors map to safe tool errors (403 names the endpoint and points to Configuration > API Access; 401; auth circuit open; 429 retry-after). Credentials are never logged or returned.
 - Multi-stage `Dockerfile`, `docker-compose.yml` (gateway mode), semantic-release pipeline.
