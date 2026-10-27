@@ -84,7 +84,7 @@ export function parseGatewayCredentials(
       ok: false,
       status: 400,
       error: "Invalid credentials",
-      message: "The Kaseya VSA X credential headers are malformed.",
+      message: "The Kaseya VSA X Token ID or Token Secret isn't valid (it can't contain ':' or line breaks). Copy both again from Configuration > API Access > Third-Party Tokens.",
     };
   }
   return { ok: true, creds };

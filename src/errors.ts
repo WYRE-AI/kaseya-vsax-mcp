@@ -45,7 +45,9 @@ export function toSafeErrorMessage(err: unknown, secrets: readonly string[] = []
     return `Kaseya VSA X has nothing at ${safePath(err.path)}. Check the ID, for example with the matching list tool.`;
   }
   if (err instanceof KaseyaVsaxConfigError) {
-    return scrub(`Kaseya VSA X connection settings aren't valid: ${sentence(err.message)}.`);
+    return scrub(
+      `Kaseya VSA X connection settings aren't valid: ${sentence(err.message)}. Set the server URL to your tenant host, like acme.vsax.net, and copy the Token ID and Token Secret again from Configuration > API Access > Third-Party Tokens.`
+    );
   }
   if (err instanceof KaseyaVsaxTimeoutError) {
     return "The Kaseya VSA X request timed out. Try again, or narrow it with filter or a smaller top.";

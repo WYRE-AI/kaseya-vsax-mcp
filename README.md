@@ -118,7 +118,7 @@ Those headers are the only credential source for that request. Missing headers r
 - **Fail-closed S2S** on HTTP; `/health` is the only unauthenticated route.
 - **SSRF / credential-exfiltration guard**: the SDK only sends credentials to `<one-label>.vsax.net` over HTTPS.
 - **Secrets are never logged or returned.** SDK errors are mapped to fixed, safe messages (403 names the endpoint and points to Configuration > API Access > Third-Party Tokens; 401 "didn't accept the API token"; circuit open "rejected the API token twice in a row, so requests are paused for N minutes"; 429 says how long to wait). Unknown errors are not passed through.
-- **Input limits** (WYREAI-454): request bodies over 256 KiB get a 413 JSON-RPC error before parsing and the transport enforces the same `maxRequestBodySize`; tool inputs are limited to 10,000 elements; every tool schema caps string lengths (IDs 128, filter 1000, orderby 200), `top` (100) and array sizes. Tool results are truncated at 200,000 characters.
+- **Input limits**: request bodies over 256 KiB get a 413 JSON-RPC error before parsing and the transport enforces the same `maxRequestBodySize`; tool inputs are limited to 10,000 elements; every tool schema caps string lengths (IDs 128, filter 1000, orderby 200), `top` (100) and array sizes. Tool results are truncated at 200,000 characters.
 
 ## Local development
 

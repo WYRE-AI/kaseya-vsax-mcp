@@ -53,7 +53,7 @@ export function toolInputTooLargeResult(max = MAX_TOOL_INPUT_ELEMENTS) {
     content: [
       {
         type: 'text' as const,
-        text: `Tool input exceeds the maximum of ${max} elements`,
+        text: `Tool input has more than ${max} values. Send fewer or shorter values.`,
       },
     ],
     isError: true,

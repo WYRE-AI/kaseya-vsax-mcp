@@ -255,10 +255,10 @@ export const TOOLS: ToolDef[] = [
     handler: async ({ client }, args) => {
       const p = a<ListArgs & { entityType?: "organization" | "site" | "group" | "device"; entityId?: string | number }>(args);
       if (!p.entityType) {
-        if (p.entityId !== undefined) throw new ToolInputError("entityId requires entityType");
+        if (p.entityId !== undefined) throw new ToolInputError("entityId needs entityType too. Set entityType to organization, site, group or device, or leave out entityId to list the field definitions.");
         return toPage(await client.customFields.list(listParams(p)), p);
       }
-      if (p.entityId === undefined) throw new ToolInputError("entityType requires entityId");
+      if (p.entityId === undefined) throw new ToolInputError("entityType needs entityId too. Pass the ID of that organization, site, group or device.");
       switch (p.entityType) {
         case "organization":
           return { items: await client.organizations.customFields(p.entityId) };
@@ -338,7 +338,7 @@ export const TOOLS: ToolDef[] = [
     handler: async ({ client }, args) => {
       const p = a<{ executionId: string | number; deviceId?: string; scriptId?: string }>(args);
       const tasks = client.automation.tasks;
-      if (p.scriptId && !p.deviceId) throw new ToolInputError("scriptId requires deviceId");
+      if (p.scriptId && !p.deviceId) throw new ToolInputError("scriptId needs deviceId too. Pass the device's Identifier, which you can get by calling this tool with deviceId only to list its scripts.");
       if (p.deviceId && p.scriptId) return tasks.scriptOutput(p.executionId, p.deviceId, p.scriptId);
       if (p.deviceId) return { items: await tasks.executionDeviceScripts(p.executionId, p.deviceId) };
       const [execution, devices] = await Promise.all([

@@ -250,7 +250,7 @@ describe("error mapping", () => {
       "Kaseya VSA X has nothing at /api/v3/devices/d. Check the ID, for example with the matching list tool."
     );
     expect(toSafeErrorMessage(new KaseyaVsaxConfigError("Server host must be a single label under .vsax.net."), secrets)).toBe(
-      "Kaseya VSA X connection settings aren't valid: Server host must be a single label under .vsax.net."
+      "Kaseya VSA X connection settings aren't valid: Server host must be a single label under .vsax.net. Set the server URL to your tenant host, like acme.vsax.net, and copy the Token ID and Token Secret again from Configuration > API Access > Third-Party Tokens."
     );
   });
 
