@@ -1,0 +1,13 @@
+{
+  "name": "@wyre-ai/kaseya-vsax-mcp",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Scaffold placeholder so CI can run until the WYREAI-493 sources land. Main has no application sources yet.",
+  "license": "Apache-2.0",
+  "scripts": {
+    "typecheck": "true",
+    "lint": "true",
+    "test": "true",
+    "build": "true"
+  }
+}
